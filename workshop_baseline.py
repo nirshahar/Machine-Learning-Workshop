@@ -14,7 +14,6 @@ from tensorflow.keras.losses import binary_crossentropy
 import data_conversion
 import matplotlib.pyplot as plt
 
-
 agg = data_conversion.get_agg_list()
 nagg = data_conversion.get_non_agg_list()
 
@@ -39,10 +38,10 @@ dgcnn_model = DeepGraphCNN(
 )
 x_inp, x_out = dgcnn_model.in_out_tensors()
 
-x_out = Conv1D(filters=16, kernel_size=sum(layer_sizes), strides=sum(layer_sizes))(x_out)
+x_out = Conv1D(filters=32, kernel_size=sum(layer_sizes), strides=sum(layer_sizes))(x_out)
 x_out = MaxPool1D(pool_size=2)(x_out)
 
-x_out = Conv1D(filters=32, kernel_size=5, strides=1)(x_out)
+x_out = Conv1D(filters=64, kernel_size=5, strides=1)(x_out)
 
 x_out = Flatten()(x_out)
 
