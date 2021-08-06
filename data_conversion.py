@@ -3,6 +3,9 @@ from stellargraph import StellarGraph
 import logging
 import numpy as np
 from networkx import Graph
+from rdkit import Chem
+from rdkit.Chem.rdchem import BondType
+from rdkit.Chem import Crippen
 
 logging.getLogger('pysmiles').setLevel(logging.CRITICAL)  # Anything higher than warning
 
@@ -18,7 +21,79 @@ edge_to_vec = {0: np.concatenate((np.array([1]), np.zeros(26))), 1: np.concatena
 			   3: np.concatenate((np.array([0, 0, 0, 0, 1]), np.zeros(22)))}
 
 
-def parse_smiles(
+def parse_smiles(smile,explicit_hydrogen: bool = False,
+		zero_order_bonds: bool = True,
+		reinterpret_aromatic: bool = True,
+		compute_valence: bool = False,
+		valence_respect_hcount: bool = True,
+		valence_respect_bond_order: bool = True,
+		valence_max_bond_order: int = 3):
+	global p
+
+
+	mol = Chem.MolFromSmiles(smile)
+	if mol is None:
+		print("Cannot parse smile: " + str(smile))
+
+	logP = Chem.Crippen.MolLogP(mol)
+
+	graph = Graph()
+
+	for atom in mol.GetAtoms():
+
+		atomic_num = atom.GetAtomicNum()
+		if atomic_num not in element_to_vec:
+			new_one_hot_vector = np.array([0 for _ in range(l)])
+			new_one_hot_vector[p] = 1
+			p += 1
+			element_to_vec.update({atomic_num: new_one_hot_vector})
+
+		#extra_features = np.array([atom.GetMass(), atom.GetDegree(), atom.GetImplicitValence(), int(atom.GetIsAromatic())])
+		extra_features = np.array([atom.GetNumImplicitHs(), atom.GetMass(), atom.GetFormalCharge(), float(atom.GetIsAromatic()), logP])
+
+		features = np.concatenate((element_to_vec[atomic_num], extra_features))
+		graph.add_node(atom.GetIdx(), features=features)
+
+	for bond in mol.GetBonds():
+		graph.add_edge(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx(), bond_type=bond.GetBondType())
+
+	pysmiles_graph = read_smiles(smile)
+	for u, v in pysmiles_graph.edges:
+		bond_type = pysmiles_graph.adj[u][v]['order']
+		if bond_type == 0:
+			graph.add_edge(u, v, bond_type=BondType.ZERO)
+
+	for node in graph:
+		zero_bond = 0
+		one_bond = 0
+		#one_half_bond = 0
+		two_bond = 0
+		three_bond = 0
+		aromatic_bond = 0
+
+		for adj_node in graph.adj[node]:
+			edge_type = graph.adj[node][adj_node]['bond_type']
+			if edge_type == BondType.ZERO:
+				zero_bond += 1
+			elif edge_type == BondType.SINGLE:
+				one_bond += 1
+			elif edge_type == BondType.DOUBLE:
+				two_bond += 1
+			elif edge_type == BondType.TRIPLE:
+				three_bond += 1
+			elif edge_type == BondType.AROMATIC:
+				aromatic_bond += 1
+			else:
+				raise Exception("bond type not understood: " + str(edge_type))
+
+		bonds = np.array([zero_bond, one_bond, two_bond, three_bond, aromatic_bond])
+
+		features = np.concatenate((graph.nodes[node]['features'], bonds))
+		graph.nodes[node]['features'] = features
+
+	return graph
+
+def parse_smiles_pysmiles(
 		smiles: str,
 		explicit_hydrogen: bool = False,
 		zero_order_bonds: bool = True,
@@ -66,6 +141,7 @@ def create_features(
 		)
 
 	global p
+
 	for node in graph:
 
 		element_string = graph.nodes[node]["element"]
@@ -83,6 +159,7 @@ def create_features(
 		for adj_node in graph.adj[node]:
 			edge_type = graph.adj[node][adj_node]['order']
 			if edge_type == 0:
+				print("zero bond!")
 				zero_bond += 1
 			elif edge_type == 1:
 				one_bond += 1
@@ -332,4 +409,4 @@ def get_agg_list(
 
 
 if __name__ == "__main__":
-	print(get_data(True, is_generator=False, data_count=100))
+	print(get_data(True, is_generator=False))

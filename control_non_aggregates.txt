@@ -301,7 +301,6 @@ CHEMBL2348333        NC(=O)c1sc2nccc(N3CCCC3)c2c1N        262.338
 CHEMBL1702777        CCCNC(=O)c1c(CSc2ccc(Cl)cc2)noc1C(=O)NCc1ccccc1        443.956
 CHEMBL3393342        CC1CCCN(c2ncnc3[nH]cc(-c4cccc(C#N)c4)c23)C1        317.396
 CHEMBL1727704        COc1ccccc1C(=O)COC(=O)CCCNC1=NS(=O)(=O)c2ccccc21        416.455
-CHEMBL3558069        CC(C)(C)C1=CC(=CC=Cc2cc(C(C)(C)C)[Se+]c(C(C)(C)C)c2)C=C(C(C)(C)C)[Se]1        549.583
 CHEMBL353193        CCC(=O)N(c1ccccc1)C1(COC)CCN(CCn2ccn(CC)c2=O)CC1        414.55
 CHEMBL1312180        Cc1ccc(C(=O)NC(=S)Nc2ccccc2C(F)(F)F)cc1        338.354
 CHEMBL90903        COC(=O)C1C2CCC(CC1c1ccc(Cl)cc1)O2        280.751
