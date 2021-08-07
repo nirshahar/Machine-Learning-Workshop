@@ -9,8 +9,8 @@ from rdkit.Chem import Crippen
 
 logging.getLogger('pysmiles').setLevel(logging.CRITICAL)  # Anything higher than warning
 
-NON_AGG_FILEPATH = "control_non_aggregates"
-AGG_FILEPATH = "agg"
+NON_AGG_FILEPATH = "control_non_aggregates_canonical"
+AGG_FILEPATH = "agg_canonical"
 
 l = 23
 p = 0
@@ -274,7 +274,7 @@ def get_non_agg_generator(
 		non_agg = non_agg_file.readline()
 
 		while non_agg != "" and (data_count is None or cnt < data_count):
-			parsed_non_agg = non_agg.strip().split()[1].replace("se", "Se")
+			parsed_non_agg = non_agg.strip().split()[0].replace("se", "Se")
 
 			graph = parse_smiles(
 				parsed_non_agg,
@@ -314,7 +314,7 @@ def get_non_agg_list(
 
 		data_count = len(non_aggs) if data_count is None else data_count
 		for non_agg in non_aggs[:data_count]:
-			parsed_non_agg = non_agg.strip().split()[1].replace("se", "Se")
+			parsed_non_agg = non_agg.strip().split()[0].replace("se", "Se")
 
 			graph = parse_smiles(
 				parsed_non_agg,
@@ -350,7 +350,7 @@ def get_agg_generator(
 	with open(agg_filepath + ".txt", "r") as agg_file:
 		agg = agg_file.readline()
 		while agg != "" and (data_count is None or cnt < data_count):
-			parsed_agg = agg.strip().split()[0]
+			parsed_agg = agg.strip().split()[0].replace("se", "Se")
 
 			graph = parse_smiles(
 				parsed_agg,
@@ -388,7 +388,7 @@ def get_agg_list(
 		data_count = len(aggs) if data_count is None else data_count
 
 		for agg in aggs[:data_count]:
-			parsed_agg = agg.strip().split()[0]
+			parsed_agg = agg.strip().split()[0].replace("se", "Se")
 
 			graph = parse_smiles(
 				parsed_agg,
