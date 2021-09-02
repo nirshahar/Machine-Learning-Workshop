@@ -1,76 +1,158 @@
-from pysmiles import read_smiles
+from pysmiles import *
 from stellargraph import StellarGraph
 import logging
 import numpy as np
-import networkx
+from networkx import Graph
+from rdkit import Chem
+from rdkit.Chem.rdchem import BondType
+from rdkit.Chem import Crippen
+from rdkit.Avalon.pyAvalonTools import Generate2DCoords
 
 logging.getLogger('pysmiles').setLevel(logging.CRITICAL)  # Anything higher than warning
 
-NON_AGG_FILENAME = "control_non_aggregates"
-AGG_FILENAME = "agg"
+NON_AGG_FILEPATH = "control_non_aggregates_canonical"
+AGG_FILEPATH = "agg_canonical"
 
-
-l = 22
+l = 23
 p = 0
 element_to_vec = {}
-edge_to_vec = {0: np.concatenate((np.array([1]), np.zeros(26))), 1: np.concatenate((np.array([0, 1]), np.zeros(25))), 1.5: np.concatenate((np.array([0, 0, 1]), np.zeros(24))), 2: np.concatenate((np.array([0, 0, 0, 1]), np.zeros(23))), 3: np.concatenate((np.array([0, 0, 0, 0, 1]), np.zeros(22)))}
+edge_to_vec = {0: np.concatenate((np.array([1]), np.zeros(26))), 1: np.concatenate((np.array([0, 1]), np.zeros(25))),
+			   1.5: np.concatenate((np.array([0, 0, 1]), np.zeros(24))),
+			   2: np.concatenate((np.array([0, 0, 0, 1]), np.zeros(23))),
+			   3: np.concatenate((np.array([0, 0, 0, 0, 1]), np.zeros(22)))}
 
 
-# def create_features2(graph):
-# 	global p
-# 	for node in graph:
-# 		element_string = graph.nodes[node]["element"]
-# 		if element_string not in element_to_vec:
-# 			new_one_hot_vector = np.array([0 for i in range(l)])
-# 			new_one_hot_vector[p] = 1
-# 			p += 1
-# 			element_to_vec.update({element_string: new_one_hot_vector})
-#
-# 		zero_bond = 0
-# 		one_bond = 0
-# 		one_half_bond = 0
-# 		two_bond = 0
-# 		three_bond = 0
-# 		for adj_node in graph.adj[node]:
-# 			edge_type = graph.adj[node][adj_node]['order']
-# 			if edge_type == 0:
-# 				zero_bond += 1
-# 			elif edge_type == 1:
-# 				one_bond += 1
-# 			elif edge_type == 1.5:
-# 				one_half_bond += 1
-# 			elif edge_type == 2:
-# 				two_bond += 1
-# 			elif edge_type == 3:
-# 				three_bond += 1
-# 			else:
-# 				raise Exception("bond type not understood: " + str(edge_type))
-#
-# 		bonds = np.array([zero_bond, one_bond, one_half_bond, two_bond, three_bond])
-#
-# 		graph.nodes[node]["element"] = np.concatenate((np.array([0]), bonds, element_to_vec[element_string]))
-#
-# 	new_graph = networkx.create_empty_copy(graph)
-# 	edges = graph.edges.data("order")
-# 	for i, (v, u, bond) in enumerate(edges):
-# 		edge_name = "edge_node" + str(i)
-#
-# 		new_graph.add_node(edge_name)
-#
-# 		new_graph.add_edge(v, edge_name)
-# 		new_graph.add_edge(edge_name, u)
-#
-# 		new_graph.nodes[edge_name]["element"] = np.concatenate((np.array([1]), edge_to_vec[bond]))
-#
-# 	return new_graph
-
-def create_features(graph):
+def parse_smiles(smile,explicit_hydrogen: bool = False,
+		zero_order_bonds: bool = True,
+		reinterpret_aromatic: bool = True,
+		compute_valence: bool = False,
+		valence_respect_hcount: bool = True,
+		valence_respect_bond_order: bool = True,
+		valence_max_bond_order: int = 3):
 	global p
+
+
+	mol = Chem.MolFromSmiles(smile)
+	if mol is None:
+		print("Cannot parse smile: " + str(smile))
+
+	logP = Chem.Crippen.MolLogP(mol)
+
+
+	Generate2DCoords(mol)
+	conformer = mol.GetConformer()
+
+	graph = Graph()
+
+	for atom in mol.GetAtoms():
+		pos = conformer.GetAtomPosition(atom.GetIdx())
+
+		atomic_num = atom.GetAtomicNum()
+		if atomic_num not in element_to_vec:
+			new_one_hot_vector = np.array([0 for _ in range(l)])
+			new_one_hot_vector[p] = 1
+			p += 1
+			element_to_vec.update({atomic_num: new_one_hot_vector})
+
+		#extra_features = np.array([atom.GetMass(), atom.GetDegree(), atom.GetImplicitValence(), int(atom.GetIsAromatic())])
+		extra_features = np.array([pos.x, pos.y, atom.GetNumImplicitHs(), atom.GetMass(), atom.GetFormalCharge(), float(atom.GetIsAromatic()), logP])
+
+		features = np.concatenate((element_to_vec[atomic_num], extra_features))
+		graph.add_node(atom.GetIdx(), features=features)
+
+	for bond in mol.GetBonds():
+		graph.add_edge(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx(), bond_type=bond.GetBondType())
+
+	pysmiles_graph = read_smiles(smile)
+	for u, v in pysmiles_graph.edges:
+		bond_type = pysmiles_graph.adj[u][v]['order']
+		if bond_type == 0:
+			graph.add_edge(u, v, bond_type=BondType.ZERO)
+
+	for node in graph:
+		zero_bond = 0
+		one_bond = 0
+		#one_half_bond = 0
+		two_bond = 0
+		three_bond = 0
+		aromatic_bond = 0
+
+		for adj_node in graph.adj[node]:
+			edge_type = graph.adj[node][adj_node]['bond_type']
+			if edge_type == BondType.ZERO:
+				zero_bond += 1
+			elif edge_type == BondType.SINGLE:
+				one_bond += 1
+			elif edge_type == BondType.DOUBLE:
+				two_bond += 1
+			elif edge_type == BondType.TRIPLE:
+				three_bond += 1
+			elif edge_type == BondType.AROMATIC:
+				aromatic_bond += 1
+			else:
+				raise Exception("bond type not understood: " + str(edge_type))
+
+		bonds = np.array([zero_bond, one_bond, two_bond, three_bond, aromatic_bond])
+
+		features = np.concatenate((graph.nodes[node]['features'], bonds))
+		graph.nodes[node]['features'] = features
+
+	return graph
+
+def parse_smiles_pysmiles(
+		smiles: str,
+		explicit_hydrogen: bool = False,
+		zero_order_bonds: bool = True,
+		reinterpret_aromatic: bool = True,
+		compute_valence: bool = False,
+		valence_respect_hcount: bool = True,
+		valence_respect_bond_order: bool = True,
+		valence_max_bond_order: int = 3
+):
+
+	graph = read_smiles(
+		smiles,
+		explicit_hydrogen=explicit_hydrogen,
+		zero_order_bonds=zero_order_bonds,
+		reinterpret_aromatic=reinterpret_aromatic
+	)
+
+	graph = create_features(
+		graph,
+		explicit_hydrogen=explicit_hydrogen,
+		compute_valence=compute_valence,
+		valence_respect_hcount=valence_respect_hcount,
+		valence_respect_bond_order=valence_respect_bond_order,
+		valence_max_bond_order=valence_max_bond_order
+	)
+
+	return graph
+
+
+def create_features(
+		graph: Graph,
+		explicit_hydrogen: bool = False,
+		compute_valence: bool = False,
+		valence_respect_hcount: bool = True,
+		valence_respect_bond_order: bool = True,
+		valence_max_bond_order: int = 3
+):
+
+	if compute_valence:
+		fill_valence(
+			graph,
+			respect_hcount=valence_respect_hcount,
+			respect_bond_order=valence_respect_bond_order,
+			max_bond_order=valence_max_bond_order
+		)
+
+	global p
+
 	for node in graph:
 
 		element_string = graph.nodes[node]["element"]
 		if element_string not in element_to_vec:
-			new_one_hot_vector = np.array([0 for i in range(l)])
+			new_one_hot_vector = np.array([0 for _ in range(l)])
 			new_one_hot_vector[p] = 1
 			p += 1
 			element_to_vec.update({element_string: new_one_hot_vector})
@@ -83,6 +165,7 @@ def create_features(graph):
 		for adj_node in graph.adj[node]:
 			edge_type = graph.adj[node][adj_node]['order']
 			if edge_type == 0:
+				print("zero bond!")
 				zero_bond += 1
 			elif edge_type == 1:
 				one_bond += 1
@@ -97,45 +180,158 @@ def create_features(graph):
 
 		bonds = np.array([zero_bond, one_bond, one_half_bond, two_bond, three_bond])
 
-		extra_node_data = np.array([graph.nodes[node]['charge'], float(graph.nodes[node]['aromatic']), graph.nodes[node]['hcount']])
+		extra_node_data = np.array([graph.nodes[node]['charge'], float(graph.nodes[node]['aromatic'])])
 
 		features = np.concatenate((extra_node_data, bonds, element_to_vec[element_string]))
 
-		graph.nodes[node]["features"] = features
+		if not explicit_hydrogen:
+			features = np.concatenate((features, np.array([graph.nodes[node]['hcount']])))
+
+		graph.nodes[node]['features'] = features
 
 	return graph
 
 
-def get_non_agg_generator(non_agg_filename=NON_AGG_FILENAME, data_count=None):
+def get_data(
+		is_agg: bool,
+		is_generator: bool = False,
+		filepath: str = None,
+		data_count: int = None,
+		explicit_hydrogen: bool = False,
+		zero_order_bonds: bool = True,
+		reinterpret_aromatic: bool = True,
+		compute_valence: bool = False,
+		valence_respect_hcount: bool = True,
+		valence_respect_bond_order: bool = True,
+		valence_max_bond_order: int = 3
+):
+
+	if is_agg:
+		filepath = filepath if filepath is not None else AGG_FILEPATH
+		if is_generator:
+			return get_agg_generator(
+				agg_filepath=filepath,
+				data_count=data_count,
+				explicit_hydrogen=explicit_hydrogen,
+				zero_order_bonds=zero_order_bonds,
+				reinterpret_aromatic=reinterpret_aromatic,
+				compute_valence=compute_valence,
+				valence_respect_hcount=valence_respect_hcount,
+				valence_respect_bond_order=valence_respect_bond_order,
+				valence_max_bond_order=valence_max_bond_order
+			)
+
+		else:
+			return get_agg_list(
+				agg_filepath=filepath,
+				data_count=data_count,
+				explicit_hydrogen=explicit_hydrogen,
+				zero_order_bonds=zero_order_bonds,
+				reinterpret_aromatic=reinterpret_aromatic,
+				compute_valence=compute_valence,
+				valence_respect_hcount=valence_respect_hcount,
+				valence_respect_bond_order=valence_respect_bond_order,
+				valence_max_bond_order=valence_max_bond_order
+			)
+
+	else:
+		filepath = filepath if filepath is not None else NON_AGG_FILEPATH
+		if is_generator:
+			return get_non_agg_generator(
+				non_agg_filepath=filepath,
+				data_count=data_count,
+				explicit_hydrogen=explicit_hydrogen,
+				zero_order_bonds=zero_order_bonds,
+				reinterpret_aromatic=reinterpret_aromatic,
+				compute_valence=compute_valence,
+				valence_respect_hcount=valence_respect_hcount,
+				valence_respect_bond_order=valence_respect_bond_order,
+				valence_max_bond_order=valence_max_bond_order
+			)
+
+		else:
+			return get_non_agg_list(
+				non_agg_filepath=filepath,
+				data_count=data_count,
+				explicit_hydrogen=explicit_hydrogen,
+				zero_order_bonds=zero_order_bonds,
+				reinterpret_aromatic=reinterpret_aromatic,
+				compute_valence=compute_valence,
+				valence_respect_hcount=valence_respect_hcount,
+				valence_respect_bond_order=valence_respect_bond_order,
+				valence_max_bond_order=valence_max_bond_order
+			)
+
+
+def get_non_agg_generator(
+		non_agg_filepath: str = NON_AGG_FILEPATH,
+		data_count: int = None,
+		explicit_hydrogen: bool = False,
+		zero_order_bonds: bool = True,
+		reinterpret_aromatic: bool = True,
+		compute_valence: bool = False,
+		valence_respect_hcount: bool = True,
+		valence_respect_bond_order: bool = True,
+		valence_max_bond_order: int = 3
+):
+
 	cnt = 0
-	with open(non_agg_filename + ".txt", "r") as non_agg_file:
+	with open(non_agg_filepath + ".txt", "r") as non_agg_file:
 		non_agg = non_agg_file.readline()
+
 		while non_agg != "" and (data_count is None or cnt < data_count):
-			parsed_non_agg = non_agg.strip().split()[1].replace("se", "Se")
+			parsed_non_agg = non_agg.strip().split()[0].replace("se", "Se")
 
-			graph = read_smiles(parsed_non_agg)
-			graph = create_features(graph)
+			graph = parse_smiles(
+				parsed_non_agg,
+				explicit_hydrogen=explicit_hydrogen,
+				zero_order_bonds=zero_order_bonds,
+				reinterpret_aromatic=reinterpret_aromatic,
+				compute_valence=compute_valence,
+				valence_respect_hcount=valence_respect_hcount,
+				valence_respect_bond_order=valence_respect_bond_order,
+				valence_max_bond_order=valence_max_bond_order
+			)
 
-			stellar_graph = StellarGraph.from_networkx(graph=graph, node_features="features")
+			sg_non_agg = StellarGraph.from_networkx(graph=graph, node_features="features")
 
-			yield stellar_graph
+			yield sg_non_agg
 
-			cnt += 1
 			non_agg = non_agg_file.readline()
+			cnt += 1
 
 
-def get_non_agg_list(non_agg_filename=NON_AGG_FILENAME, data_count=None):
+def get_non_agg_list(
+		non_agg_filepath: str = NON_AGG_FILEPATH,
+		data_count: int = None,
+		explicit_hydrogen: bool = False,
+		zero_order_bonds: bool = True,
+		reinterpret_aromatic: bool = True,
+		compute_valence: bool = False,
+		valence_respect_hcount: bool = True,
+		valence_respect_bond_order: bool = True,
+		valence_max_bond_order: int = 3
+):
+
 	non_agg_list = []
 
-	with open(non_agg_filename + ".txt", "r") as non_agg_file:
+	with open(non_agg_filepath + ".txt", "r") as non_agg_file:
 		non_aggs = non_agg_file.readlines()
 
 		data_count = len(non_aggs) if data_count is None else data_count
 		for non_agg in non_aggs[:data_count]:
-			parsed_non_agg = non_agg.strip().split()[1].replace("se", "Se")
+			parsed_non_agg = non_agg.strip().split()[0].replace("se", "Se")
 
-			graph = read_smiles(parsed_non_agg)
-			graph = create_features(graph)
+			graph = parse_smiles(
+				parsed_non_agg,
+				explicit_hydrogen=explicit_hydrogen,
+				zero_order_bonds=zero_order_bonds,
+				reinterpret_aromatic=reinterpret_aromatic,
+				compute_valence=compute_valence,
+				valence_respect_hcount=valence_respect_hcount,
+				valence_respect_bond_order=valence_respect_bond_order,
+				valence_max_bond_order=valence_max_bond_order
+			)
 
 			sg_non_agg = StellarGraph.from_networkx(graph=graph, node_features="features")
 
@@ -144,15 +340,34 @@ def get_non_agg_list(non_agg_filename=NON_AGG_FILENAME, data_count=None):
 	return non_agg_list
 
 
-def get_agg_generator(agg_filename=AGG_FILENAME, data_count=None):
+def get_agg_generator(
+		agg_filepath: str = AGG_FILEPATH,
+		data_count: int = None,
+		explicit_hydrogen: bool = False,
+		zero_order_bonds: bool = True,
+		reinterpret_aromatic: bool = True,
+		compute_valence: bool = False,
+		valence_respect_hcount: bool = True,
+		valence_respect_bond_order: bool = True,
+		valence_max_bond_order: int = 3
+):
+
 	cnt = 0
-	with open(agg_filename + ".txt", "r") as agg_file:
+	with open(agg_filepath + ".txt", "r") as agg_file:
 		agg = agg_file.readline()
 		while agg != "" and (data_count is None or cnt < data_count):
-			parsed_agg = agg.strip().split()[0]
+			parsed_agg = agg.strip().split()[0].replace("se", "Se")
 
-			graph = read_smiles(parsed_agg)
-			graph = create_features(graph)
+			graph = parse_smiles(
+				parsed_agg,
+				explicit_hydrogen=explicit_hydrogen,
+				zero_order_bonds=zero_order_bonds,
+				reinterpret_aromatic=reinterpret_aromatic,
+				compute_valence=compute_valence,
+				valence_respect_hcount=valence_respect_hcount,
+				valence_respect_bond_order=valence_respect_bond_order,
+				valence_max_bond_order=valence_max_bond_order
+			)
 
 			yield StellarGraph.from_networkx(graph=graph, node_features="features")
 
@@ -160,19 +375,37 @@ def get_agg_generator(agg_filename=AGG_FILENAME, data_count=None):
 			agg = agg_file.readline()
 
 
+def get_agg_list(
+		agg_filepath=AGG_FILEPATH,
+		data_count=None,
+		explicit_hydrogen=False,
+		zero_order_bonds=True,
+		reinterpret_aromatic=True,
+		compute_valence=False,
+		valence_respect_hcount=True,
+		valence_respect_bond_order=True,
+		valence_max_bond_order=3
+):
 
-def get_agg_list(agg_filename=AGG_FILENAME, data_count=None):
 	agg_list = []
 
-	with open(agg_filename + ".txt", "r") as agg_file:
+	with open(agg_filepath + ".txt", "r") as agg_file:
 		aggs = agg_file.readlines()
 		data_count = len(aggs) if data_count is None else data_count
 
 		for agg in aggs[:data_count]:
-			parsed_agg = agg.strip().split()[0]
+			parsed_agg = agg.strip().split()[0].replace("se", "Se")
 
-			graph = read_smiles(parsed_agg)
-			graph = create_features(graph)
+			graph = parse_smiles(
+				parsed_agg,
+				explicit_hydrogen=explicit_hydrogen,
+				zero_order_bonds=zero_order_bonds,
+				reinterpret_aromatic=reinterpret_aromatic,
+				compute_valence=compute_valence,
+				valence_respect_hcount=valence_respect_hcount,
+				valence_respect_bond_order=valence_respect_bond_order,
+				valence_max_bond_order=valence_max_bond_order
+			)
 
 			sg_agg = StellarGraph.from_networkx(graph=graph, node_features="features")
 
@@ -181,8 +414,5 @@ def get_agg_list(agg_filename=AGG_FILENAME, data_count=None):
 	return agg_list
 
 
-
 if __name__ == "__main__":
-	for x in get_non_agg_generator():
-		break
-
+	print(get_data(True, is_generator=False))
