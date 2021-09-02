@@ -30,12 +30,12 @@ graph_labels_dummies = pd.get_dummies(graph_labels, drop_first=True)
 
 generator = PaddedGraphGenerator(graphs=graphs)
 
-k = 30  # the number of rows for the output tensor
-layer_sizes = [32, 32, 1]
+k = 35  # the number of rows for the output tensor
+layer_sizes = [32, 32, 32, 1]
 
 dgcnn_model = DeepGraphCNN(
     layer_sizes=layer_sizes,
-    activations=["tanh", "tanh", "tanh"],
+    activations=["tanh", "tanh", "tanh", "tanh"],
     k=k,
     bias=False,
     generator=generator,

@@ -6,6 +6,7 @@ from networkx import Graph
 from rdkit import Chem
 from rdkit.Chem.rdchem import BondType
 from rdkit.Chem import Crippen
+from rdkit.Avalon.pyAvalonTools import Generate2DCoords
 
 logging.getLogger('pysmiles').setLevel(logging.CRITICAL)  # Anything higher than warning
 
@@ -37,9 +38,14 @@ def parse_smiles(smile,explicit_hydrogen: bool = False,
 
 	logP = Chem.Crippen.MolLogP(mol)
 
+
+	Generate2DCoords(mol)
+	conformer = mol.GetConformer()
+
 	graph = Graph()
 
 	for atom in mol.GetAtoms():
+		pos = conformer.GetAtomPosition(atom.GetIdx())
 
 		atomic_num = atom.GetAtomicNum()
 		if atomic_num not in element_to_vec:
@@ -49,7 +55,7 @@ def parse_smiles(smile,explicit_hydrogen: bool = False,
 			element_to_vec.update({atomic_num: new_one_hot_vector})
 
 		#extra_features = np.array([atom.GetMass(), atom.GetDegree(), atom.GetImplicitValence(), int(atom.GetIsAromatic())])
-		extra_features = np.array([atom.GetNumImplicitHs(), atom.GetMass(), atom.GetFormalCharge(), float(atom.GetIsAromatic()), logP])
+		extra_features = np.array([pos.x, pos.y, atom.GetNumImplicitHs(), atom.GetMass(), atom.GetFormalCharge(), float(atom.GetIsAromatic()), logP])
 
 		features = np.concatenate((element_to_vec[atomic_num], extra_features))
 		graph.add_node(atom.GetIdx(), features=features)
